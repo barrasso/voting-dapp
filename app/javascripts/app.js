@@ -5,91 +5,47 @@ import "../stylesheets/app.css";
 import { default as Web3} from 'web3';
 import { default as contract } from 'truffle-contract'
 
-// Import our contract artifacts and turn them into usable abstractions.
-import metacoin_artifacts from '../../build/contracts/MetaCoin.json'
+/*
+ * When you compile and deploy your Vote contract,
+ * truffle stores the abi and deployed address in a json
+ * file in the build directory. We will use this information
+ * to setup a Vote abstraction. We will use this abstraction
+ * later to create an instance of the Vote contract.
+ */
 
-// MetaCoin is our usable abstraction, which we'll use through the code below.
-var MetaCoin = contract(metacoin_artifacts);
+import vote_artifacts from '../../build/contracts/Vote.json'
 
-// The following code is simple to show off interacting with your contracts.
-// As your needs grow you will likely need to change its form and structure.
-// For application bootstrapping, check out window.addEventListener below.
-var accounts;
-var account;
+var Vote = contract(vote_artifacts);
 
-window.App = {
-  start: function() {
-    var self = this;
+let candidates = {"Mark": "candidate-1", "Stas": "candidate-2", "Kristen": "candidate-3"}
 
-    // Bootstrap the MetaCoin abstraction for Use.
-    MetaCoin.setProvider(web3.currentProvider);
+window.voteForCandidate = function(candidate) {
+  let candidateName = $("#candidate").val();
+  try {
+    $("#msg").html("Vote has been submitted. The vote count will increment as soon as the vote is recorded on the blockchain. Please wait.")
+    $("#candidate").val("");
 
-    // Get the initial account balance so it can be displayed.
-    web3.eth.getAccounts(function(err, accs) {
-      if (err != null) {
-        alert("There was an error fetching your accounts.");
-        return;
-      }
-
-      if (accs.length == 0) {
-        alert("Couldn't get any accounts! Make sure your Ethereum client is configured correctly.");
-        return;
-      }
-
-      accounts = accs;
-      account = accounts[0];
-
-      self.refreshBalance();
+    /* Vote.deployed() returns an instance of the contract. Every call
+     * in Truffle returns a promise which is why we have used then()
+     * everywhere we have a transaction call
+     */
+    Vote.deployed().then(function(contractInstance) {
+      contractInstance.voteForCandidate(candidateName, {gas: 140000, from: web3.eth.accounts[0]}).then(function() {
+        let div_id = candidates[candidateName];
+        return contractInstance.totalVotesFor.call(candidateName).then(function(v) {
+          $("#" + div_id).html(v.toString());
+          $("#msg").html("");
+        });
+      });
     });
-  },
-
-  setStatus: function(message) {
-    var status = document.getElementById("status");
-    status.innerHTML = message;
-  },
-
-  refreshBalance: function() {
-    var self = this;
-
-    var meta;
-    MetaCoin.deployed().then(function(instance) {
-      meta = instance;
-      return meta.getBalance.call(account, {from: account});
-    }).then(function(value) {
-      var balance_element = document.getElementById("balance");
-      balance_element.innerHTML = value.valueOf();
-    }).catch(function(e) {
-      console.log(e);
-      self.setStatus("Error getting balance; see log.");
-    });
-  },
-
-  sendCoin: function() {
-    var self = this;
-
-    var amount = parseInt(document.getElementById("amount").value);
-    var receiver = document.getElementById("receiver").value;
-
-    this.setStatus("Initiating transaction... (please wait)");
-
-    var meta;
-    MetaCoin.deployed().then(function(instance) {
-      meta = instance;
-      return meta.sendCoin(receiver, amount, {from: account});
-    }).then(function() {
-      self.setStatus("Transaction complete!");
-      self.refreshBalance();
-    }).catch(function(e) {
-      console.log(e);
-      self.setStatus("Error sending coin; see log.");
-    });
+  } catch (err) {
+    console.log(err);
   }
-};
+}
 
-window.addEventListener('load', function() {
-  // Checking if Web3 has been injected by the browser (Mist/MetaMask)
+$(document).ready(function() {
   if (typeof web3 !== 'undefined') {
-    console.warn("Using web3 detected from external source. If you find that your accounts don't appear or you have 0 MetaCoin, ensure you've configured that source properly. If using MetaMask, see the following link. Feel free to delete this warning. :) http://truffleframework.com/tutorials/truffle-and-metamask")
+    console.warn("Using web3 detected from external source like MetaMask")
     // Use Mist/MetaMask's provider
     window.web3 = new Web3(web3.currentProvider);
   } else {
@@ -98,5 +54,14 @@ window.addEventListener('load', function() {
     window.web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
   }
 
-  App.start();
+  Vote.setProvider(web3.currentProvider);
+  let candidateNames = Object.keys(candidates);
+  for (var i = 0; i < candidateNames.length; i++) {
+    let name = candidateNames[i];
+    Vote.deployed().then(function(contractInstance) {
+      contractInstance.totalVotesFor.call(name).then(function(v) {
+        $("#" + candidates[name]).html(v.toString());
+      });
+    })
+  }
 });
