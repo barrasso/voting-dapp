@@ -1,47 +1,131 @@
-pragma solidity ^0.4.11;
-// We have to specify what version of compiler this code will compile with
+pragma solidity ^0.4.13;
 
 contract Vote {
-  /* mapping field below is equivalent to an associative array or hash.
-  The key of the mapping is candidate name stored as type bytes32 and value is
-  an unsigned integer to store the vote count
-  */
-  
-  mapping (bytes32 => uint8) public votesReceived;
-  
-  /* Solidity doesn't let you pass in an array of strings in the constructor (yet).
-  We will use an array of bytes32 instead to store the list of candidates
-  */
-  
-  bytes32[] public candidateList;
 
-  /* This is the constructor which will be called once when you
-  deploy the contract to the blockchain. When we deploy the contract,
-  we will pass an array of candidates who will be contesting in the election
-  */
-  function Vote(bytes32[] candidateNames) {
-    candidateList = candidateNames;
+  address public owner;
+
+  struct voter {
+    address voterAddress; // The address of the voter
+    uint tokensBought;    // The total no. of tokens this voter owns
+    uint[] tokensUsedPerCandidate; // Array to keep track of votes per candidate.
+    /* We have an array called candidateList initialized below.
+     Every time this voter votes with her tokens, the value at that
+     index is incremented. Example, if candidateList array declared
+     below has ["Mark", "Stas", "Kristen"] and this
+     voter votes 10 tokens to Mark, the tokensUsedPerCandidate[0] 
+     will be incremented by 10.
+     */
   }
 
-  // This function returns the total votes a candidate has received so far
-  function totalVotesFor(bytes32 candidate) returns (uint8) {
-    if (validCandidate(candidate) == false) throw;
+  /* mapping is equivalent to an associate array or hash.
+   The key of the mapping is candidate name stored as type bytes32 
+   and value is an unsigned integer which used to store the vote 
+   count
+   */
+  mapping (bytes32 => uint) public votesReceived;
+  mapping (address => voter) public voterInfo;
+
+  /* Solidity doesn't let you return an array of strings yet. We will 
+   use an array of bytes32 instead to store the list of candidates
+   */
+  bytes32[] public candidateList;
+  uint public totalTokens; // Total no. of tokens available for this election
+  uint public balanceTokens; // Total no. of tokens still available for purchase
+  uint public tokenPrice; // Price per token
+
+  /* When the contract is deployed on the blockchain, we will 
+  initialize the total number of tokens for sale, cost per token and
+  all the candidates
+   */
+  function Vote(uint tokens, uint pricePerToken, bytes32[] candidateNames) {
+    owner = msg.sender;
+    candidateList = candidateNames;
+    totalTokens = tokens;
+    balanceTokens = tokens;
+    tokenPrice = pricePerToken;
+  }
+
+  function totalVotesFor(bytes32 candidate) constant returns (uint) {
     return votesReceived[candidate];
   }
 
-  // This function increments the vote count for the specified candidate. This
-  // is equivalent to casting a vote
-  function voteForCandidate(bytes32 candidate) {
-    if (validCandidate(candidate) == false) throw;
-    votesReceived[candidate] += 1;
-  }
+  /* Instead of just taking the candidate name as an argument, we now also
+   require the no. of tokens this voter wants to vote for the candidate
+   */
+  function voteForCandidate(bytes32 candidate, uint votesInTokens) {
+    uint index = indexOfCandidate(candidate);
+    if (index == uint(-1)) throw;
 
-  function validCandidate(bytes32 candidate) returns (bool) {
-    for(uint i = 0; i < candidateList.length; i++) {
-      if (candidateList[i] == candidate) {
-        return true;
+    // msg.sender gives us the address of the account/voter who is trying
+    // to call this function
+    if (voterInfo[msg.sender].tokensUsedPerCandidate.length == 0) {
+      for(uint i = 0; i < candidateList.length; i++) {
+        voterInfo[msg.sender].tokensUsedPerCandidate.push(0);
       }
     }
-    return false;
+
+    // Make sure this voter has enough tokens to cast the vote
+    uint availableTokens = voterInfo[msg.sender].tokensBought - totalTokensUsed(voterInfo[msg.sender].tokensUsedPerCandidate);
+    if (availableTokens < votesInTokens) throw;
+
+    votesReceived[candidate] += votesInTokens;
+
+    // Store how many tokens were used for this candidate
+    voterInfo[msg.sender].tokensUsedPerCandidate[index] += votesInTokens;
+  }
+
+  // Return the sum of all the tokens used by this voter.
+  function totalTokensUsed(uint[] _tokensUsedPerCandidate) private constant returns (uint) {
+    uint totalUsedTokens = 0;
+    for(uint i = 0; i < _tokensUsedPerCandidate.length; i++) {
+      totalUsedTokens += _tokensUsedPerCandidate[i];
+    }
+    return totalUsedTokens;
+  }
+
+  function indexOfCandidate(bytes32 candidate) constant returns (uint) {
+    for(uint i = 0; i < candidateList.length; i++) {
+      if (candidateList[i] == candidate) {
+        return i;
+      }
+    }
+    return uint(-1);
+  }
+
+  /* This function is used to purchase the tokens. Note the keyword 'payable'
+   below. By just adding that one keyword to a function, your contract can
+   now accept Ether from anyone who calls this function. Accepting money can
+   not get any easier than this!
+   */
+
+  function buy() payable returns (uint) {
+    uint tokensToBuy = msg.value / tokenPrice;
+    if (tokensToBuy > balanceTokens) throw;
+    voterInfo[msg.sender].voterAddress = msg.sender;
+    voterInfo[msg.sender].tokensBought += tokensToBuy;
+    balanceTokens -= tokensToBuy;
+    return tokensToBuy;
+  }
+
+  function tokensSold() constant returns (uint) {
+    return totalTokens - balanceTokens;
+  }
+
+  function voterDetails(address user) constant returns (uint, uint[]) {
+    return (voterInfo[user].tokensBought, voterInfo[user].tokensUsedPerCandidate);
+  }
+
+  /* All the ether sent by voters who purchased the tokens is in this
+   contract's account. This method will be used to transfer out all those ethers
+   in to another account.
+   */
+
+  function transferTo(address account) {
+    if (msg.sender != owner) throw;
+    account.transfer(this.balance);
+  }
+
+  function allCandidates() constant returns (bytes32[]) {
+    return candidateList;
   }
 }
